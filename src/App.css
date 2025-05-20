@@ -1,0 +1,201 @@
+@import "tailwindcss";
+/* animations.css 또는 index.css 등에 추가 */
+@keyframes flicker {
+  0%, 10%, 20%, 30%, 40%, 50%, 60%, 70%, 80%, 90%, 100% {
+    opacity: 1;
+    text-shadow:
+      0 0 3px #00ff00,
+      0 0 7px #0f0,
+      0 0 15px #0ff,
+      0 0 25px #0f0,
+      0 0 45px #00ffcc,
+      0 0 70px #00ff00;
+    color: #00ff00;
+  }
+  5%, 15%, 25%, 35%, 45%, 55%, 65%, 75%, 85%, 95% {
+    opacity: 0.6;
+    text-shadow:
+      0 0 1px #004400,
+      0 0 2px #006600,
+      0 0 4px #008800;
+    color: #003300;
+  }
+}
+.animate-flicker {
+  animation: flicker 15s ease-in-out infinite;
+}
+
+.animate-flicker {
+  animation: flicker 60s infinite;
+}
+
+@keyframes typing {
+  from { width: 0 }
+  to { width: 100% }
+}
+@keyframes blinkCaret {
+  0%, 100% { border-color: transparent }
+  50% { border-color: #00ff00 }
+}
+.animate-typewriter {
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 2px solid #00ff00;
+  animation:
+    typing 4s steps(50, end) forwards,
+    blinkCaret 0.75s step-end infinite;
+}
+.input-hacker {
+  background: transparent;
+  color: #00ff00;
+  font-family: 'Courier New', monospace;
+  border: none;
+  border-bottom: 2px solid #00ff00;
+  outline: none;
+  caret-color: #00ff00;
+  box-shadow:
+    0 0 5px #00ff00,
+    0 0 10px #00ff00,
+    0 0 20px #00ffcc;
+  animation: blinkCaret 0.75s step-end infinite;
+}
+.shadow-glow {
+  box-shadow:
+    0 0 3px #00ff00,
+    0 0 6px #00ff00,
+    0 0 12px #00ff00;
+}
+
+/* 배경 네온 그리드 */
+.bg-grid {
+  background-image: linear-gradient(rgba(0, 255, 0, 0.1) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0, 255, 0, 0.1) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* 상하로 움직이는 스캐너 */
+@keyframes scan {
+  0% { transform: translateY(-100%) }
+  100% { transform: translateY(100%) }
+}
+.animate-scan {
+  animation: scan 9s linear infinite;
+}
+@keyframes glowPulse {
+  0% {
+    text-shadow: 0 0 5px #0f0, 0 0 10px #0f0, 0 0 20px #0f0;
+  }
+  50% {
+    text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc, 0 0 30px #00ffcc;
+  }
+  100% {
+    text-shadow: 0 0 5px #0f0, 0 0 10px #0f0, 0 0 20px #0f0;
+  }
+}
+.animate-glow {
+  animation: glowPulse 5s infinite;
+}
+
+@keyframes terminalFlow {
+  0% { background-position: 0 0 }
+  100% { background-position: 0 100% }
+}
+.bg-terminal-flow {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 255, 0, 0.1) 0px,
+    rgba(0, 255, 0, 0.1) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  background-size: 100% 2px;
+  animation: terminalFlow 10s linear infinite;
+}
+
+/* 커스텀 스크롤바 - 크롬, 엣지, 사파리용 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 255, 0, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 0, 0.4);
+  border-radius: 4px;
+  box-shadow:
+    0 0 5px #00ff00,
+    0 0 10px #00ff00;
+  transition: background-color 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 0, 0.7);
+}
+
+/* 파이어폭스용 스크롤바 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 0, 0.4) rgba(0, 255, 0, 0.05);
+}
+
+/* 채팅 입력 애니메이션: 입력박스 포커스 시 네온 빛 반짝임 */
+.input-hacker:focus {
+  animation: glowPulse 2s infinite;
+  box-shadow:
+    0 0 8px #00ff00,
+    0 0 16px #00ff00,
+    0 0 24px #00ffcc,
+    0 0 32px #00ff00;
+}
+
+/* 채팅 수신 메시지 애니메이션: 부드러운 네온 페이드 인 + 살짝 위에서 내려오기 */
+@keyframes chatReceiveFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+    text-shadow: none;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(2px);
+    text-shadow:
+      0 0 6px #00ff00,
+      0 0 12px #00ff00,
+      0 0 18px #00ffcc;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    text-shadow:
+      0 0 0px #00ff00,
+      0 0 0px #00ff00,
+      0 0 0px #00ffcc;
+  }
+}
+
+/* 메시지 요소에 클래스 부여 예: .chat-message */
+.chat-message {
+  animation: chatReceiveFadeIn 0.8s ease forwards;
+}
+
+/* 채팅 전송 버튼 클릭 시 잠깐 반짝임 효과 */
+@keyframes buttonClickGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 4px #00ff00,
+      0 0 8px #00ff00;
+  }
+  50% {
+    box-shadow:
+      0 0 14px #00ff00,
+      0 0 28px #00ff00,
+      0 0 40px #00ffcc;
+  }
+}
+
+.button-glow-click {
+  animation: buttonClickGlow 0.4s ease;
+}
