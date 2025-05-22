@@ -1,5 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { Timestamp } from "firebase/firestore";
+import { notifyUser } from "./utils/notifications";
+import { parseCommand } from "./utils/commandParser";
+import { fetchGptApiKey } from "./utils/fetchGptKey";
+import { callChatGpt } from "./utils/chatGptRequest";
+import { formatDate } from "./utils/formatDate";
 import {
     db,
     collection,
@@ -42,21 +47,11 @@ type Repo = {
     name: string;
 };
 
-function formatDate(date: Date) {
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    const day = date.getDate().toString().padStart(2, "0");
-    const hours24 = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    const ampm = hours24 >= 12 ? "오후" : "오전";
-    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-    return `${year}-${month}-${day} ${ampm} ${hours12.toString().padStart(2, "0")}:${minutes}`;
-}
-
 const Chatting = () => {
     // 채팅 관련
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
+    const [showCommandList, setShowCommandList] = useState(false);
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -71,7 +66,7 @@ const Chatting = () => {
         { sha: string; message: string; author: string; date: string }[]
     >([]);
     const [commitDetail, setCommitDetail] = useState<CommitDetail | null>(null);
-
+    const [buttonClicked, setButtonClicked] = useState(false);
     // Firebase Auth 상태 감지
     useEffect(() => {
         const auth = getAuth();
@@ -81,7 +76,11 @@ const Chatting = () => {
         });
         return () => unsubscribeAuth();
     }, []);
-
+    useEffect(() => {
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission();
+        }
+    }, []);
     // Firestore 메시지 실시간 구독
     useEffect(() => {
         const messagesRef = collection(db, "messages");
@@ -141,6 +140,46 @@ const Chatting = () => {
         }
         fetchRepos();
     }, [owner]);
+    useEffect(() => {
+        const messagesRef = collection(db, "messages");
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+
+        let firstLoad = true;
+        let prevMessageIds = new Set<string>();
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const newMessages: ChatMessage[] = [];
+            const newMessageIds = new Set<string>();
+
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const message: ChatMessage = {
+                    id: doc.id,
+                    timestamp: data.timestamp,
+                    user: data.user,
+                    text: data.text,
+                };
+                newMessages.push(message);
+                newMessageIds.add(doc.id);
+
+                // 🔔 알림 조건
+                if (
+                    !firstLoad &&
+                    !prevMessageIds.has(doc.id) &&
+                    data.user !== userEmail &&
+                    data.user !== "System"
+                ) {
+                    notifyUser(data.user, data.text);
+                }
+            });
+
+            prevMessageIds = newMessageIds;
+            setMessages(newMessages);
+            firstLoad = false;
+        });
+
+        return () => unsubscribe();
+    }, [userEmail]);
 
     // 리포지토리 선택시 브랜치 불러오기
     useEffect(() => {
@@ -227,25 +266,144 @@ const Chatting = () => {
             setCommitDetail(null);
         }
     };
-    const [buttonClicked, setButtonClicked] = useState(false);
-    // 메시지 전송
-    const sendMessage = async () => {
-        if (!input.trim() || !userEmail) return;
+    const sendMessageInternal = async (
+        text: string,
+        sender: string = "System",
+        options?: { localOnly?: boolean }
+    ) => {
+        const newMessage: ChatMessage = {
+            id: "local-" + Date.now(),
+            timestamp: { toDate: () => new Date() } as Timestamp,
+            user: sender,
+            text,
+        };
+
+        if (options?.localOnly) {
+            setMessages((prev) => [...prev, newMessage]);
+            return;
+        }
+
         try {
             await addDoc(collection(db, "messages"), {
-                user: userEmail,
-                text: input.trim(),
+                user: sender,
+                text,
                 timestamp: serverTimestamp(),
             });
-            setInput("");
-
-            // 버튼 클릭 시 반짝임 효과 트리거
-            setButtonClicked(true);
-            setTimeout(() => setButtonClicked(false), 400); // 애니메이션 길이와 일치
         } catch (e) {
-            console.error("Error sending message:", e);
+            console.error("sendMessageInternal error:", e);
         }
     };
+    // 내부에서 사용하는 비동기 커맨드 핸들러
+    const handleCommand = async (input: string): Promise<boolean> => {
+        const parsed = parseCommand(input);
+        if (!parsed) return false;
+        const { command, args } = parsed;
+
+        switch (command) {
+            case "clear":
+                setMessages([]);
+                return true;
+
+            case "me":
+                if (userEmail) {
+                    await sendMessageInternal(`* ${userEmail} ${args.join(" ")}`, userEmail, { localOnly: true });
+                }
+                return true;
+
+            case "help":
+                await sendMessageInternal(
+                    `사용 가능한 명령어:/clear /me [내용] /help /bot [질문]`,
+                    "System (Local)",
+                    { localOnly: true }
+                );
+                return true;
+
+            case "bot": {
+                const prompt = args.join(" ");
+                if (!prompt) {
+                    await sendMessageInternal("질문을 입력해주세요. 예: /bot 오늘 날씨는?", "Freeman", { localOnly: true });
+                    return true;
+                }
+
+                if (userEmail) {
+                    await sendMessageInternal(prompt, userEmail);
+                }
+
+                await sendMessageInternal("GPT에 요청 중...", "System", { localOnly: true });
+
+                const apiKey = await fetchGptApiKey();
+                if (!apiKey) {
+                    await sendMessageInternal("GPT API 키를 찾을 수 없습니다.", "System", { localOnly: true });
+                    return true;
+                }
+
+                try {
+                    const reply = await callChatGpt(prompt, apiKey);
+                    await sendMessageInternal(reply.trim(), "Freeman");
+                } catch (e) {
+                    await sendMessageInternal("GPT 응답 오류: " + (e as Error).message, "System", { localOnly: true });
+                }
+
+                return true;
+            }
+
+
+            default:
+                await sendMessageInternal(`알 수 없는 명령어: /${command}`, "System", { localOnly: true });
+                return true;
+        }
+    };
+
+
+    const sendMessage = async () => {
+  if (!input.trim() || !userEmail) return;
+  const trimmed = input.trim();
+
+  try {
+    if (trimmed.startsWith("/")) {
+      await handleCommand(trimmed);
+      return;
+    }
+
+    await sendMessageInternal(trimmed, userEmail);
+
+    const containsFreeman = /freeman|프리먼|프리맨/i.test(trimmed);
+    if (containsFreeman) {
+      await sendMessageInternal("GPT에 요청 중...", "System", { localOnly: true });
+
+      const apiKey = await fetchGptApiKey();
+      if (!apiKey) {
+        await sendMessageInternal("GPT API 키를 찾을 수 없습니다.", "System", { localOnly: true });
+        return;
+      }
+
+      // ✅ 최근 프리먼 관련 대화 메시지 최대 6개 추출
+      const recentHistory = messages
+        .filter((m) => m.user === userEmail || m.user === "Freeman")
+        .slice(-6)
+        .map((m) => ({
+          role: m.user === "Freeman" ? "assistant" : "user",
+          content: m.text,
+        }));
+
+      try {
+        const reply = await callChatGpt(trimmed, apiKey, recentHistory);
+        await sendMessageInternal(reply, "Freeman");
+      } catch (e) {
+        await sendMessageInternal("GPT 응답 오류: " + (e as Error).message, "System", { localOnly: true });
+      }
+    }
+  } catch (e) {
+    console.error("sendMessage 전체 오류:", e);
+  } finally {
+    setInput("");
+    setButtonClicked(true);
+    setTimeout(() => setButtonClicked(false), 400);
+  }
+};
+
+
+
 
     return (
         <div className="flex flex-col h-screen bg-black text-green-400 font-mono overflow-hidden">
@@ -314,8 +472,8 @@ const Chatting = () => {
                                 <li
                                     key={branch.name}
                                     className={`cursor-pointer py-1 px-2 rounded hover:bg-green-900 ${selectedBranch === branch.name
-                                            ? "bg-green-700 font-bold"
-                                            : ""
+                                        ? "bg-green-700 font-bold"
+                                        : ""
                                         }`}
                                     onClick={() => handleBranchClick(branch.name)}
                                 >
@@ -382,31 +540,45 @@ const Chatting = () => {
             </div>
 
             {/* 메시지 입력 및 전송 */}
-            <div className="p-4 border-t border-green-600 flex items-center space-x-2 bg-black">
+            <div className="p-4 border-t border-green-600 flex items-center space-x-2 bg-black relative">
                 <input
-                    className="input-hacker flex-1 bg-transparent border border-green-600 rounded px-3 py-2 text-green-400 placeholder-green-600 focus:outline-none focus:border-green-400"
-                    placeholder="메시지를 입력하세요"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    spellCheck={false}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        setShowCommandList(e.target.value.startsWith("/"));
+                    }}
                     onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                             e.preventDefault();
                             sendMessage();
+                            setShowCommandList(false);
                         }
                     }}
+                    className="input-hacker flex-1 bg-transparent border border-green-600 rounded px-3 py-2 text-green-400 placeholder-green-600 focus:outline-none"
+                    placeholder="메시지를 입력하세요"
+                    spellCheck={false}
                 />
                 <button
                     onClick={sendMessage}
-                    className={`px-4 py-2 border border-green-600 rounded hover:bg-green-700 ${buttonClicked ? "button-glow-click" : ""}`}
+                    className={`px-4 py-2 border border-green-600 rounded hover:bg-green-700 ${buttonClicked ? "button-glow-click" : ""
+                        }`}
                     disabled={!input.trim()}
                 >
                     전송
                 </button>
 
+                {showCommandList && (
+                    <div className="absolute left-0 bottom-full mb-2 bg-black border border-green-600 p-2 text-sm text-green-300 rounded shadow-xl w-64">
+                        <div>/clear - 채팅 초기화</div>
+                        <div>/me [내용] - 나의 상태를 말하기</div>
+                        <div>/help - 명령어 도움말</div>
+                        <div>/bot [질문] - ChatGPT에 질문</div>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
+
 
 export default Chatting;
